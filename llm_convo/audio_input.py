@@ -4,6 +4,7 @@ import tempfile
 import queue
 import functools
 import logging
+from typing import Optional
 
 from pydub import AudioSegment
 import speech_recognition as sr
@@ -17,25 +18,29 @@ def get_whisper_model(size: str = "large"):
 
 
 class WhisperMicrophone:
-    def __init__(self):
+    def __init__(self, language: Optional[str] = "english"):
         self.audio_model = get_whisper_model()
         self.recognizer = sr.Recognizer()
         self.recognizer.energy_threshold = 500
         self.recognizer.pause_threshold = 0.8
         self.recognizer.dynamic_energy_threshold = False
+        self.language = language
 
     def get_transcription(self) -> str:
-        with sr.Microphone(sample_rate=16000) as source:
-            logging.info("Waiting for mic...")
-            with tempfile.TemporaryDirectory() as tmp:
-                tmp_path = os.path.join(tmp, "mic.wav")
-                audio = self.recognizer.listen(source)
-                data = io.BytesIO(audio.get_wav_data())
-                audio_clip = AudioSegment.from_file(data)
-                audio_clip.export(tmp_path, format="wav")
-                result = self.audio_model.transcribe(tmp_path, language="english")
-            predicted_text = result["text"]
-        return predicted_text
+        try:
+            with sr.Microphone(sample_rate=16000) as source:
+                logging.info("Waiting for mic...")
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_path = os.path.join(tmp, "mic.wav")
+                    audio = self.recognizer.listen(source)
+                    data = io.BytesIO(audio.get_wav_data())
+                    audio_clip = AudioSegment.from_file(data)
+                    audio_clip.export(tmp_path, format="wav")
+                    result = self.audio_model.transcribe(tmp_path, language=self.language)
+                return result["text"]
+        except Exception:
+            logging.exception("WhisperMicrophone transcription failed.")
+            return ""
 
 
 class _TwilioSource(sr.AudioSource):
@@ -64,25 +69,30 @@ class _QueueStream:
 
 
 class WhisperTwilioStream:
-    def __init__(self):
+    def __init__(self, language: Optional[str] = "english"):
         self.audio_model = get_whisper_model()
         self.recognizer = sr.Recognizer()
         self.recognizer.energy_threshold = 300
         self.recognizer.pause_threshold = 2.5
         self.recognizer.dynamic_energy_threshold = False
         self.stream = None
+        self.language = language
 
     def get_transcription(self) -> str:
         self.stream = _QueueStream()
-        with _TwilioSource(self.stream) as source:
-            logging.info("Waiting for twilio caller...")
-            with tempfile.TemporaryDirectory() as tmp:
-                tmp_path = os.path.join(tmp, "mic.wav")
-                audio = self.recognizer.listen(source)
-                data = io.BytesIO(audio.get_wav_data())
-                audio_clip = AudioSegment.from_file(data)
-                audio_clip.export(tmp_path, format="wav")
-                result = self.audio_model.transcribe(tmp_path, language="english")
-        predicted_text = result["text"]
-        self.stream = None
-        return predicted_text
+        try:
+            with _TwilioSource(self.stream) as source:
+                logging.info("Waiting for twilio caller...")
+                with tempfile.TemporaryDirectory() as tmp:
+                    tmp_path = os.path.join(tmp, "mic.wav")
+                    audio = self.recognizer.listen(source)
+                    data = io.BytesIO(audio.get_wav_data())
+                    audio_clip = AudioSegment.from_file(data)
+                    audio_clip.export(tmp_path, format="wav")
+                    result = self.audio_model.transcribe(tmp_path, language=self.language)
+            return result["text"]
+        except Exception:
+            logging.exception("WhisperTwilioStream transcription failed.")
+            return ""
+        finally:
+            self.stream = None
